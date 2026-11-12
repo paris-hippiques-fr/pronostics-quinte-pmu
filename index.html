@@ -96,13 +96,130 @@
                 </div>
             </div>
             <div class="col-12 col-md-8 video-block">
-                <div class="mbr-figure"><iframe class="mbr-embedded-video" src="https://www.youtube.com/embed/4XIV7pQOYTQ?rel=0&amp;amp;mute=1&amp;showinfo=0&amp;autoplay=1&amp;loop=1&amp;playlist=4XIV7pQOYTQ" width="1280" height="720" frameborder="0" allowfullscreen></iframe></div>
+                <div class="mbr-figure"><iframe id="latest-playlist-video"  class="mbr-embedded-video" src="https://www.youtube.com/embed/4XIV7pQOYTQ?rel=0&amp;amp;mute=1&amp;showinfo=0&amp;autoplay=1&amp;loop=1&amp;playlist=4XIV7pQOYTQ" width="1280" height="720" frameborder="0" allowfullscreen></iframe></div>
                 <p class="mbr-description mbr-fonts-style mt-3 display-4">
                     <a href="https://www.youtube.com/@PLAY-QUINTE/videos" class="text-primary">Bienvenue sur PLAY-QUINTE ! Ici.</a>
                 </p>
             </div>
         </div>
     </div>
+
+<script>
+  // =========================================================================
+  // CONFIGURATION
+  // =========================================================================
+
+  // ID de votre playlist (commence généralement par "PL").
+  var playlistID = "PLpqagYfQaQnSSwIYKfGBMf4MccZOD8y6g";
+
+  // Construction de l'URL du flux RSS officiel de YouTube pour cette playlist.
+  var rssURL = "https://www.youtube.com/feeds/videos.xml?playlist_id=" + playlistID;
+
+  // URL du service intermédiaire rss2json, qui va récupérer le flux pour nous
+  // et nous le renvoyer au format JSON (contournement du blocage CORS).
+  var apiURL = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(rssURL);
+
+  // On récupère une seule fois la référence à l'iframe pour ne pas la chercher
+  // plusieurs fois dans le DOM (petite optimisation, mais surtout plus propre).
+  var playerIframe = document.getElementById("latest-playlist-video");
+
+  // =========================================================================
+  // FONCTION UTILITAIRE : REMPLACER LA VIDÉO AFFICHÉE
+  // =========================================================================
+
+  // Cette fonction prend un ID de vidéo en paramètre, construit l'URL d'embed
+  // appropriée, et met à jour l'attribut 'src' de l'iframe.
+  // Elle n'est appelée QUE si la récupération a réussi : elle "écrase" donc
+  // la vidéo par défaut par la vidéo la plus récente.
+  function replaceVideo(videoId) {
+    // Sécurité : on ne fait rien si l'ID est vide ou invalide.
+    if (!videoId) return;
+
+    // Construction de l'URL d'embed avec quelques options :
+    //  - rel=0      : limite les suggestions à la fin à la même chaîne.
+    //  - autoplay=1 : lance la lecture automatiquement.
+    //  - mute=1     : démarre en sourdine (nécessaire pour que l'autoplay
+    //                 soit autorisé par les navigateurs modernes).
+    var embedUrl = "https://www.youtube.com/embed/" + videoId + "?rel=0&autoplay=1&mute=1";
+
+    // C'est LA ligne qui remplace la vidéo par défaut.
+    // Tant que cette ligne n'est pas exécutée, l'iframe garde son 'src' initial.
+    playerIframe.src = embedUrl;
+  }
+
+  // =========================================================================
+  // LOGIQUE PRINCIPALE : TENTER DE RÉCUPÉRER LA DERNIÈRE VIDÉO
+  // =========================================================================
+
+  // On lance la requête vers rss2json.
+  fetch(apiURL)
+
+    // --- ÉTAPE A : Vérification de la réponse HTTP ---
+    .then(function(response) {
+      // Si la réponse n'est pas un succès (code HTTP autre que 200-299),
+      // on lève une erreur qui sera attrapée par le .catch() plus bas.
+      // Cela couvre notamment le cas où rss2json renvoie une erreur 500.
+      if (!response.ok) {
+        throw new Error("rss2json a répondu avec le code HTTP " + response.status);
+      }
+      // Sinon, on convertit la réponse en objet JSON exploitable.
+      return response.json();
+    })
+
+    // --- ÉTAPE B : Traitement des données reçues ---
+    .then(function(data) {
+      // On vérifie que la réponse contient bien une liste de vidéos non vide.
+      if (data.items && data.items.length > 0) {
+
+        // Le flux RSS de YouTube liste les vidéos de la plus récente
+        // à la plus ancienne. Le premier élément est donc la dernière publiée.
+        var latestVideo = data.items[0];
+
+        // On récupère le lien complet, par exemple :
+        // "https://www.youtube.com/watch?v=XXXXXXXXXXX"
+        var videoLink = latestVideo.link;
+
+        // On extrait uniquement l'ID : tout ce qui se trouve après le "=".
+        // (indexOf("=") donne la position du "=", +1 pour commencer juste après,
+        // et substring() sans second argument prend jusqu'à la fin de la chaîne.)
+        var videoId = videoLink.substring(videoLink.indexOf("=") + 1);
+
+        // On remplace la vidéo par défaut par la vidéo la plus récente.
+        // À ce stade, le script a réussi : la page affiche donc la bonne vidéo.
+        replaceVideo(videoId);
+
+      } else {
+        // Cas rare : le flux est valide mais ne contient aucune vidéo
+        // (playlist vide, ou structure inattendue). On ne fait rien :
+        // la vidéo par défaut reste affichée. On log simplement un avertissement.
+        console.warn(
+          "Le flux de la playlist ne contient aucune vidéo. " +
+          "La vidéo par défaut reste affichée."
+        );
+      }
+    })
+
+    // --- ÉTAPE C : Gestion des erreurs ---
+    .catch(function(error) {
+      // Ce bloc s'exécute si :
+      //  - la requête réseau vers rss2json a échoué (service hors ligne, DNS, etc.) ;
+      //  - rss2json a renvoyé une erreur HTTP (couvert par l'étape A) ;
+      //  - la réponse n'était pas du JSON valide ;
+      //  - une autre erreur inattendue est survenue.
+      //
+      // ⚠️ POINT CLÉ : on ne touche PAS à l'iframe dans ce bloc.
+      // Elle conserve donc son 'src' initial, c'est-à-dire la vidéo par défaut.
+      // C'est exactement le comportement souhaité : l'utilisateur voit toujours
+      // une vidéo utile, même si la mise à jour automatique échoue.
+      console.error(
+        "Erreur lors de la récupération de la dernière vidéo. " +
+        "La vidéo par défaut reste affichée. Détail :",
+        error
+      );
+    });
+</script>
+
+	
 </section>
 
 <section data-bs-version="5.1" class="footer4 cid-uZ8jWTa5DF" once="footers" id="footer04-3">
